@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { supabase } from "@/integrations/supabase/client";
+import { Card, CardContent } from "@/components/ui/card";
+import { databases, DB_ID, PROFILES_COLLECTION } from "@/integrations/appwrite/client";
+import { ID, Query } from "appwrite";
 import { useAuth } from "@/contexts/AuthContext";
 import { calculateTargets } from "@/lib/nutrition";
 import { toast } from "sonner";
@@ -13,9 +14,10 @@ import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
 
 const Onboarding = () => {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+  const [checkingProfile, setCheckingProfile] = useState(true);
   const [form, setForm] = useState({
     full_name: "",
     age: "",
@@ -28,6 +30,44 @@ const Onboarding = () => {
   });
 
   const update = (key: string, val: string) => setForm((p) => ({ ...p, [key]: val }));
+
+  useEffect(() => {
+    if (authLoading || !user) return;
+    const check = async () => {
+      try {
+        const res = await databases.listDocuments(DB_ID, PROFILES_COLLECTION, [
+          Query.equal("user_id", user.$id),
+        ]);
+        const profile = res.documents[0] as { onboarding_completed?: boolean } | undefined;
+        if (profile?.onboarding_completed) {
+          navigate("/dashboard", { replace: true });
+          return;
+        }
+        if (profile) {
+          setForm((p) => ({
+            ...p,
+            full_name: (profile as { full_name?: string }).full_name ?? "",
+            age: String((profile as { age?: number }).age ?? ""),
+            gender: (profile as { gender?: string }).gender ?? "male",
+            height_cm: String((profile as { height_cm?: number }).height_cm ?? ""),
+            weight_kg: String((profile as { weight_kg?: number }).weight_kg ?? ""),
+            activity_level: (profile as { activity_level?: string }).activity_level ?? "moderate",
+            dietary_preference: (profile as { dietary_preference?: string }).dietary_preference ?? "vegetarian",
+            goal: (profile as { goal?: string }).goal ?? "maintain",
+          }));
+        }
+      } catch {
+        // No profile yet, show form
+      } finally {
+        setCheckingProfile(false);
+      }
+    };
+    check();
+  }, [user, authLoading, navigate]);
+
+  useEffect(() => {
+    if (!authLoading && !user) navigate("/");
+  }, [authLoading, user, navigate]);
 
   const handleSubmit = async () => {
     if (!user) return;
@@ -46,36 +86,51 @@ const Onboarding = () => {
       form.goal
     );
 
-    const { error } = await supabase
-      .from("profiles")
-      .upsert(
-        {
-          user_id: user.id,
-          full_name: form.full_name || null,
-          age: parseInt(form.age),
-          gender: form.gender,
-          height_cm: parseFloat(form.height_cm),
-          weight_kg: parseFloat(form.weight_kg),
-          activity_level: form.activity_level,
-          dietary_preference: form.dietary_preference,
-          goal: form.goal,
-          target_calories: targets.calories,
-          target_protein: targets.protein,
-          target_carbs: targets.carbs,
-          target_fat: targets.fat,
-          onboarding_completed: true,
-        },
-        { onConflict: "user_id" }
-      );
+    try {
+      const existing = await databases.listDocuments(DB_ID, PROFILES_COLLECTION, [
+        Query.equal("user_id", user.$id),
+      ]);
 
-    setLoading(false);
-    if (error) {
-      toast.error("Something went wrong");
-      return;
+      const doc = {
+        user_id: user.$id,
+        full_name: form.full_name || null,
+        age: parseInt(form.age),
+        gender: form.gender,
+        height_cm: parseFloat(form.height_cm),
+        weight_kg: parseFloat(form.weight_kg),
+        activity_level: form.activity_level,
+        dietary_preference: form.dietary_preference,
+        goal: form.goal,
+        target_calories: targets.calories,
+        target_protein: targets.protein,
+        target_carbs: targets.carbs,
+        target_fat: targets.fat,
+        onboarding_completed: true,
+      };
+
+      if (existing.documents.length > 0) {
+        await databases.updateDocument(DB_ID, PROFILES_COLLECTION, existing.documents[0].$id, doc);
+      } else {
+        await databases.createDocument(DB_ID, PROFILES_COLLECTION, ID.unique(), doc);
+      }
+
+      toast.success("Profile setup complete!");
+      navigate("/dashboard");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Something went wrong";
+      toast.error(msg);
+    } finally {
+      setLoading(false);
     }
-    toast.success("Profile setup complete!");
-    navigate("/dashboard");
   };
+
+  if (authLoading || checkingProfile) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse-glow w-16 h-16 rounded-full gradient-hero" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">

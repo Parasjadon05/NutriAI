@@ -1,12 +1,13 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { User, Session } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
+import type { User } from "appwrite";
+import { ID } from "appwrite";
+import { account } from "@/integrations/appwrite/client";
 
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<{ error?: { message: string } }>;
+  signIn: (email: string, password: string) => Promise<{ error?: { message: string } }>;
+  signUp: (email: string, password: string, name: string) => Promise<{ error?: { message: string } }>;
   signOut: () => Promise<void>;
 }
 
@@ -14,48 +15,54 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+    const init = async () => {
+      try {
+        const u = await account.get();
+        setUser(u);
+      } catch {
+        setUser(null);
+      } finally {
         setLoading(false);
-        // Clean OAuth hash from URL after redirect
-        if (session && window.location.hash) {
-          window.history.replaceState(null, "", window.location.pathname + window.location.search);
-        }
       }
-    );
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    };
+    init();
   }, []);
 
-  const signInWithGoogle = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/`,
-      },
-    });
-    if (error) return { error: { message: error.message } };
-    return {};
+  const signIn = async (email: string, password: string) => {
+    try {
+      await account.createEmailPasswordSession(email, password);
+      const u = await account.get();
+      setUser(u);
+      return {};
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Sign in failed";
+      return { error: { message: msg } };
+    }
+  };
+
+  const signUp = async (email: string, password: string, name: string) => {
+    try {
+      await account.create(ID.unique(), email, password, name || undefined);
+      await account.createEmailPasswordSession(email, password);
+      const u = await account.get();
+      setUser(u);
+      return {};
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Sign up failed";
+      return { error: { message: msg } };
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    await account.deleteSession("current");
+    setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );

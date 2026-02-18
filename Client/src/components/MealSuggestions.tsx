@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sparkles } from "lucide-react";
 
@@ -8,18 +9,79 @@ interface Suggestion {
   description: string;
 }
 
-const defaultSuggestions: Suggestion[] = [
-  { name: "Moong Dal Chilla", calories: 180, protein: 12, description: "High protein lentil crepe with veggies" },
-  { name: "Paneer Bhurji", calories: 250, protein: 18, description: "Scrambled cottage cheese with spices" },
-  { name: "Sprouts Salad", calories: 120, protein: 8, description: "Mixed sprouts with lemon & chaat masala" },
-  { name: "Ragi Dosa", calories: 150, protein: 6, description: "Finger millet dosa with coconut chutney" },
+const mealNames = [
+  "Moong Dal Chilla",
+  "Paneer Bhurji",
+  "Sprouts Salad",
+  "Ragi Dosa",
+  "Dal Chawal",
+  "Vegetable Pulao",
+  "Chana Masala",
+  "Palak Paneer",
+  "Idli with Sambar",
+  "Poha",
+  "Upma",
+  "Dahi Chaat",
 ];
 
-interface MealSuggestionsProps {
-  suggestions?: Suggestion[];
-}
+const descriptions = [
+  "Balanced meal with good macros",
+  "High protein option",
+  "Light and nutritious",
+  "Filling and satisfying",
+  "Quick and healthy choice",
+  "Nutrient-dense option",
+  "Well-rounded meal",
+  "Energy-boosting selection",
+];
 
-const MealSuggestions = ({ suggestions = defaultSuggestions }: MealSuggestionsProps) => (
+const shuffle = <T,>(arr: T[]): T[] => {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+};
+
+const generateRandomSuggestions = (): Suggestion[] => {
+  const seen = new Set<string>();
+  const suggestions: Suggestion[] = [];
+  const rand = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
+  const shuffledNames = shuffle(mealNames);
+  const shuffledDescs = shuffle(descriptions);
+
+  for (let i = 0; i < 4; i++) {
+    let calories = rand(120, 350);
+    let protein = rand(6, 22);
+    let key = `${calories}-${protein}`;
+    let attempts = 0;
+    while (seen.has(key) && attempts++ < 20) {
+      calories = rand(120, 350);
+      protein = rand(6, 22);
+      key = `${calories}-${protein}`;
+    }
+    seen.add(key);
+    suggestions.push({
+      name: shuffledNames[i],
+      calories,
+      protein,
+      description: shuffledDescs[i % shuffledDescs.length],
+    });
+  }
+  return suggestions;
+};
+
+const MealSuggestions = () => {
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+
+  useEffect(() => {
+    setSuggestions(generateRandomSuggestions());
+  }, []);
+
+  if (suggestions.length === 0) return null;
+
+  return (
   <Card className="shadow-card">
     <CardHeader className="pb-3">
       <CardTitle className="flex items-center gap-2 text-lg font-display">
@@ -42,6 +104,7 @@ const MealSuggestions = ({ suggestions = defaultSuggestions }: MealSuggestionsPr
       ))}
     </CardContent>
   </Card>
-);
+  );
+};
 
 export default MealSuggestions;

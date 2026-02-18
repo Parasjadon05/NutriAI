@@ -12,8 +12,6 @@ dist
 .env
 .env.local
 
-# Supabase
-supabase/.temp
 dist-ssr
 *.local
 

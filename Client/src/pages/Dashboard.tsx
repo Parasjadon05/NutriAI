@@ -1,46 +1,57 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { databases, DB_ID, PROFILES_COLLECTION, MEAL_LOGS_COLLECTION } from "@/integrations/appwrite/client";
+import { Query } from "appwrite";
 import MacroRing from "@/components/MacroRing";
 import MealCard from "@/components/MealCard";
 import MealSuggestions from "@/components/MealSuggestions";
 import AddMealDialog from "@/components/AddMealDialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { LogOut, Settings, Flame, Target } from "lucide-react";
 import { motion } from "framer-motion";
-import type { Tables } from "@/integrations/supabase/types";
+import type { Profile, MealLog } from "@/integrations/appwrite/types";
 
 const Dashboard = () => {
   const { user, signOut, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState<Tables<"profiles"> | null>(null);
-  const [meals, setMeals] = useState<Tables<"meal_logs">[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [meals, setMeals] = useState<MealLog[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   const fetchData = async () => {
     if (!user) return;
     setLoadingData(true);
 
-    const [profileRes, mealsRes] = await Promise.all([
-      supabase.from("profiles").select("*").eq("user_id", user.id).single(),
-      supabase.from("meal_logs").select("*").eq("user_id", user.id).eq("log_date", new Date().toISOString().split("T")[0]).order("created_at", { ascending: true }),
-    ]);
+    try {
+      const profileRes = await databases.listDocuments(DB_ID, PROFILES_COLLECTION, [
+        Query.equal("user_id", user.$id),
+      ]);
+      const p = profileRes.documents[0] as Profile | undefined;
 
-    if (profileRes.data) {
-      if (!profileRes.data.onboarding_completed) {
+      if (!p || !p.onboarding_completed) {
         navigate("/onboarding");
+        setLoadingData(false);
         return;
       }
-      setProfile(profileRes.data);
-    } else if (profileRes.error?.code === "PGRST116") {
+      setProfile(p);
+
+      try {
+        const mealsRes = await databases.listDocuments(DB_ID, MEAL_LOGS_COLLECTION, [
+          Query.equal("user_id", user.$id),
+          Query.equal("log_date", new Date().toISOString().split("T")[0]),
+          Query.orderAsc("$createdAt"),
+        ]);
+        setMeals((mealsRes.documents as MealLog[]) || []);
+      } catch {
+        setMeals([]);
+      }
+    } catch {
       navigate("/onboarding");
+    } finally {
       setLoadingData(false);
-      return;
     }
-    if (mealsRes.data) setMeals(mealsRes.data);
-    setLoadingData(false);
   };
 
   useEffect(() => {
@@ -83,7 +94,6 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border">
         <div className="container mx-auto flex items-center justify-between h-16 px-4">
           <div className="flex items-center gap-2">
@@ -103,7 +113,6 @@ const Dashboard = () => {
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-8">
-        {/* Greeting */}
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <h1 className="text-2xl md:text-3xl font-bold font-display text-foreground">
             Hello, {profile.full_name || "there"} 👋
@@ -113,7 +122,6 @@ const Dashboard = () => {
           </p>
         </motion.div>
 
-        {/* Quick stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: "BMI", value: bmi || "—", icon: Target, color: "text-primary" },
@@ -135,13 +143,10 @@ const Dashboard = () => {
           ))}
         </div>
 
-        {/* Macro rings */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <Card className="shadow-card">
-            <CardHeader className="pb-2">
-              <CardTitle className="font-display text-lg">Today's Macros</CardTitle>
-            </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6 pb-2">
+              <h2 className="font-display text-lg mb-4">Today's Macros</h2>
               <div className="flex justify-around flex-wrap gap-4">
                 <MacroRing label="Calories" current={totals.calories} target={profile.target_calories || 2000} unit=" kcal" color="hsl(var(--primary))" />
                 <MacroRing label="Protein" current={totals.protein} target={profile.target_protein || 100} unit="g" color="hsl(var(--secondary))" />
@@ -153,7 +158,6 @@ const Dashboard = () => {
         </motion.div>
 
         <div className="grid lg:grid-cols-2 gap-8">
-          {/* Today's Meals */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
             <h2 className="text-xl font-display font-bold text-foreground mb-4">Today's Meals</h2>
             {meals.length === 0 ? (
@@ -168,7 +172,7 @@ const Dashboard = () => {
               <div className="space-y-3">
                 {meals.map((m) => (
                   <MealCard
-                    key={m.id}
+                    key={m.$id}
                     mealType={m.meal_type}
                     mealName={m.meal_name}
                     calories={m.calories || 0}
@@ -181,7 +185,6 @@ const Dashboard = () => {
             )}
           </motion.div>
 
-          {/* AI Suggestions */}
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
             <h2 className="text-xl font-display font-bold text-foreground mb-4">AI Recommendations</h2>
             <MealSuggestions />
