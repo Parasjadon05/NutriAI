@@ -1,5 +1,7 @@
 # NutriAI — AI-Powered Nutrition App for Indian Diets
 
+[![GitHub](https://img.shields.io/badge/GitHub-NutriAI-181717?logo=github)](https://github.com/Parasjadon05/NutriAI)
+
 A full-stack web application that helps users track meals, monitor macros, and get personalized nutrition recommendations. Built with **Appwrite Cloud** for auth, database, storage, and serverless functions.
 
 ## Tech Stack
@@ -18,7 +20,7 @@ A full-stack web application that helps users track meals, monitor macros, and g
    ```
 
 2. **Configure Appwrite** — See [APPWRITE_SETUP.md](./APPWRITE_SETUP.md) for:
-   - Google OAuth
+   - Email/Password auth
    - Database collections (profiles, meal_logs)
    - Storage bucket (meal-images)
    - Cloud Function (analyze-food-image)
