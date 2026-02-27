@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { databases, DB_ID, PROFILES_COLLECTION, MEAL_LOGS_COLLECTION } from "@/integrations/appwrite/client";
@@ -9,9 +9,16 @@ import MealSuggestions from "@/components/MealSuggestions";
 import AddMealDialog from "@/components/AddMealDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { LogOut, Settings, Flame, Target } from "lucide-react";
+import { LogOut, Settings, Flame, Target, ChevronLeft, ChevronRight, History } from "lucide-react";
 import { motion } from "framer-motion";
+import { format, isToday, isYesterday, addDays, subDays } from "date-fns";
 import type { Profile, MealLog } from "@/integrations/appwrite/types";
+
+const formatDateLabel = (d: Date) => {
+  if (isToday(d)) return "Today";
+  if (isYesterday(d)) return "Yesterday";
+  return format(d, "EEE, MMM d");
+};
 
 const Dashboard = () => {
   const { user, signOut, loading: authLoading } = useAuth();
@@ -19,17 +26,38 @@ const Dashboard = () => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [meals, setMeals] = useState<MealLog[]>([]);
   const [loadingData, setLoadingData] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
 
-  const fetchData = async () => {
+  const fetchProfile = useCallback(async () => {
+    if (!user) return null;
+    const profileRes = await databases.listDocuments(DB_ID, PROFILES_COLLECTION, [
+      Query.equal("user_id", user.$id),
+    ]);
+    return profileRes.documents[0] as Profile | undefined;
+  }, [user]);
+
+  const fetchMealsForDate = useCallback(async (date: Date) => {
+    if (!user) return [];
+    try {
+      const dateStr = format(date, "yyyy-MM-dd");
+      const mealsRes = await databases.listDocuments(DB_ID, MEAL_LOGS_COLLECTION, [
+        Query.equal("user_id", user.$id),
+        Query.equal("log_date", dateStr),
+        Query.orderAsc("$createdAt"),
+      ]);
+      return (mealsRes.documents as MealLog[]) || [];
+    } catch {
+      return [];
+    }
+  }, [user]);
+
+  const fetchData = useCallback(async (date?: Date) => {
     if (!user) return;
     setLoadingData(true);
+    const targetDate = date ?? selectedDate;
 
     try {
-      const profileRes = await databases.listDocuments(DB_ID, PROFILES_COLLECTION, [
-        Query.equal("user_id", user.$id),
-      ]);
-      const p = profileRes.documents[0] as Profile | undefined;
-
+      const p = await fetchProfile();
       if (!p || !p.onboarding_completed) {
         navigate("/onboarding");
         setLoadingData(false);
@@ -37,22 +65,14 @@ const Dashboard = () => {
       }
       setProfile(p);
 
-      try {
-        const mealsRes = await databases.listDocuments(DB_ID, MEAL_LOGS_COLLECTION, [
-          Query.equal("user_id", user.$id),
-          Query.equal("log_date", new Date().toISOString().split("T")[0]),
-          Query.orderAsc("$createdAt"),
-        ]);
-        setMeals((mealsRes.documents as MealLog[]) || []);
-      } catch {
-        setMeals([]);
-      }
+      const mealsList = await fetchMealsForDate(targetDate);
+      setMeals(mealsList);
     } catch {
       navigate("/onboarding");
     } finally {
       setLoadingData(false);
     }
-  };
+  }, [user, selectedDate, fetchProfile, fetchMealsForDate, navigate]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -61,6 +81,20 @@ const Dashboard = () => {
     }
     if (user) fetchData();
   }, [user, authLoading]);
+
+  const handleDateChange = (delta: number) => {
+    const next = addDays(selectedDate, delta);
+    if (next > new Date()) return;
+    setSelectedDate(next);
+    setLoadingData(true);
+    fetchMealsForDate(next).then(setMeals).finally(() => setLoadingData(false));
+  };
+
+  const goToToday = () => {
+    setSelectedDate(new Date());
+    setLoadingData(true);
+    fetchMealsForDate(new Date()).then(setMeals).finally(() => setLoadingData(false));
+  };
 
   if (authLoading || loadingData) {
     return (
@@ -118,7 +152,9 @@ const Dashboard = () => {
             Hello, {profile.full_name || "there"} 👋
           </h1>
           <p className="text-muted-foreground font-body mt-1">
-            Here's your nutrition overview for today
+            {isToday(selectedDate)
+              ? "Here's your nutrition overview for today"
+              : `Here's your nutrition overview for ${formatDateLabel(selectedDate)}`}
           </p>
         </motion.div>
 
@@ -144,9 +180,23 @@ const Dashboard = () => {
         </div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-display text-lg">{formatDateLabel(selectedDate)}</h2>
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" onClick={() => handleDateChange(-1)}>
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <Button variant="outline" size="sm" onClick={goToToday} disabled={isToday(selectedDate)}>
+                Today
+              </Button>
+              <Button variant="outline" size="icon" onClick={() => handleDateChange(1)} disabled={isToday(selectedDate)}>
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
           <Card className="shadow-card">
             <CardContent className="pt-6 pb-2">
-              <h2 className="font-display text-lg mb-4">Today's Macros</h2>
+              <h2 className="font-display text-lg mb-4">{formatDateLabel(selectedDate)}'s Macros</h2>
               <div className="flex justify-around flex-wrap gap-4">
                 <MacroRing label="Calories" current={totals.calories} target={profile.target_calories || 2000} unit=" kcal" color="hsl(var(--primary))" />
                 <MacroRing label="Protein" current={totals.protein} target={profile.target_protein || 100} unit="g" color="hsl(var(--secondary))" />
@@ -159,12 +209,14 @@ const Dashboard = () => {
 
         <div className="grid lg:grid-cols-2 gap-8">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
-            <h2 className="text-xl font-display font-bold text-foreground mb-4">Today's Meals</h2>
+            <h2 className="text-xl font-display font-bold text-foreground mb-4">{formatDateLabel(selectedDate)}'s Meals</h2>
             {meals.length === 0 ? (
               <Card className="shadow-card">
                 <CardContent className="p-8 text-center">
                   <span className="text-4xl">🍽️</span>
-                  <p className="text-muted-foreground font-body mt-3">No meals logged yet today</p>
+                  <p className="text-muted-foreground font-body mt-3">
+                    {isToday(selectedDate) ? "No meals logged yet today" : `No meals logged on ${formatDateLabel(selectedDate)}`}
+                  </p>
                   <p className="text-sm text-muted-foreground font-body">Click "Log Meal" to get started</p>
                 </CardContent>
               </Card>
@@ -183,11 +235,37 @@ const Dashboard = () => {
                 ))}
               </div>
             )}
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-muted-foreground mb-2 flex items-center gap-2">
+                <History className="w-4 h-4" />
+                Meal History
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {[0, 1, 2, 3, 4, 5, 6].map((daysAgo) => {
+                  const d = subDays(new Date(), daysAgo);
+                  const isSelected = format(selectedDate, "yyyy-MM-dd") === format(d, "yyyy-MM-dd");
+                  return (
+                    <Button
+                      key={daysAgo}
+                      variant={isSelected ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setSelectedDate(d);
+                        setLoadingData(true);
+                        fetchMealsForDate(d).then(setMeals).finally(() => setLoadingData(false));
+                      }}
+                    >
+                      {formatDateLabel(d)}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
             <h2 className="text-xl font-display font-bold text-foreground mb-4">AI Recommendations</h2>
-            <MealSuggestions />
+            <MealSuggestions dietaryPreference={profile.dietary_preference} />
           </motion.div>
         </div>
       </main>
